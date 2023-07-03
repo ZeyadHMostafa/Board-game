@@ -27,6 +27,15 @@
 
 ## How to use
 ### Python
+#### requirements
+- numpy
+- time
+- multiprocessing
+- random
+- pygame
+- math
+- threading
+
 Run the `app.py` from the board_py directory
 #### Controls:
 - LMB	:Move a piece
