@@ -1,0 +1,8 @@
+﻿  main.cpp
+D:\workspace\projects\program_specific\c++\board_cpp\board_cpp\main.h(42,1): warning C4305: 'initializing': truncation from 'double' to 'const float'
+D:\workspace\projects\program_specific\c++\board_cpp\board_cpp\main.h(54,1): warning C4305: 'initializing': truncation from 'double' to 'const float'
+D:\workspace\projects\program_specific\c++\board_cpp\board_cpp\main.h(66,1): warning C4305: 'initializing': truncation from 'double' to 'const float'
+D:\workspace\projects\program_specific\c++\board_cpp\board_cpp\main.h(78,2): warning C4091: 'static ': ignored on left of 'MoveContainer' when no variable is declared
+D:\workspace\projects\program_specific\c++\board_cpp\board_cpp\main.h(83,2): warning C4091: 'static ': ignored on left of 'RatedMoveIndex' when no variable is declared
+D:\workspace\projects\program_specific\c++\board_cpp\board_cpp\main.h(95,2): warning C4091: 'static ': ignored on left of 'RatedMove' when no variable is declared
+  board_cpp.vcxproj -> D:\workspace\projects\program_specific\c++\board_cpp\x64\Debug\board_cpp.exe

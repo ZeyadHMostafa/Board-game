@@ -1,0 +1,962 @@
+#include <iostream>
+#include <bitset>
+#include <vector>
+#include <algorithm>
+#include <string>
+#include <fstream>
+
+#ifdef _WIN32
+#include <Windows.h>
+#else
+#include <unistd.h>
+
+#endif
+#define bitboard unsigned long long
+#define movecontainervector std::vector<MoveContainer>
+#define ratedmovevector std::vector<RatedMove>
+
+uint8_t BYTE_SET_COUNT_LOOKUP[256];
+uint8_t* ROW_PIECE_COLS_LOOKUP[256];
+uint8_t max_move_count;
+const bitboard BYTE_END = (bitboard)1<<63;
+const bitboard LL1 = (bitboard)1;
+const bitboard LLF = (bitboard)0;
+const bitboard LLT = (bitboard)-1;
+const bitboard LLC[2] = { LLF , LLT};
+
+const float ORIGINAL_MODEL_WEIGHTS[25] = {
+		12.0, 10.0,1.0,
+		0.2, 0.0, -0.2,
+		-3.0, -7,-8.0,
+
+		0.1,0.5,     1.0,2.0,
+		0.01,0.25,   0.5,1.5,
+
+		-0.1,-1.0,   -1.0,-4.0,
+		-0.01,-0.5,  -0.5,-3.0,
+};
+
+const float MODEL_WEIGHTS1[25] = {
+		12.5, 11.5,2.75,
+		0.75, 0.0, -0.25,
+		-2.5, -7.5,-9.0,
+
+		0.01,4.0,   2.4,4.9,
+		0.01,2.5,   0.4,1.7,
+
+		-0.01,-2.3,   -0.3,-4.0,
+		-0.01,-4.7,  -0.5,-3.0,
+};
+
+const float MODEL_WEIGHTS[25] = {
+		6.3, 6.3,2.75,
+		0.3, 0.0, -3.5,
+		-1.8, -4.4,-5.3,
+
+		0.01,2.9,   0.95,1.9,
+		0.4,2.0,   0.3,0.85,
+
+		-0.01,-1.1,   -0.01,-0.63,
+		-0.01,-2.3,  -0.4,-1.8,
+};
+
+struct MoveContainer {
+	uint8_t move_count = 0;
+	uint16_t moves[5] = {};
+	MoveContainer(uint16_t* _moves, uint8_t _move_count) {
+		std::memcpy(&moves, _moves,4*sizeof(uint16_t));
+		move_count = _move_count;
+	}
+	MoveContainer(){
+		move_count = 0;
+	}
+};
+
+struct RatedMoveIndex {
+	uint8_t index = 0;
+	float rating = 0.0;
+};
+
+struct RatedMove {
+	uint16_t move = 0;
+	float rating = 0;
+	RatedMove() {}
+	RatedMove(uint16_t _move) {
+		move = _move;
+	}
+	RatedMove(uint16_t _move, float _rating) {
+		rating = _rating;
+	}
+};
+
+uint8_t* AXIAL_MOVES_LOOKUP[256][16];
+uint8_t AXIAL_MOVE_COUNT_LOOKUP[256][16];
+uint8_t AXIAL_MOVES_CONTROL_LOOKUP[256][16];
+
+//up << 8
+//down >> 8
+//right << 1
+//left >> 1
+
+//(ul)(dl)(ur)(dr)
+const uint8_t AXIAL_MASKS[8] = {
+	0,
+	0b1100,
+	0,
+	0b0011,
+	0,
+	0b1010,
+	0,
+	0b0101,
+};
+
+const bitboard DIAG_MAIN_BOARD = 0x8040201008040201;
+const bitboard DIAG_RVRS_BOARD = 0x0102040810204080;
+
+
+// urdl(ur)(dr)(dl)(ul)
+const uint8_t DIRECTIONAL_POSITIONS[8] = {
+	0b0001,
+	0b0100,
+	0b1001,
+	0b0110,
+
+	0b0000,
+	0b1000,
+	0b1010,
+	0b0010
+};
+
+// urdl(ur)(dr)(dl)(ul)
+const uint8_t CIRCULAR_MASK_LOOKUP[8] = {
+	0b0100,
+	0b1000,
+	0b0010,
+	0b0001,
+	0b0010,
+	0b0001,
+	0b0100,
+	0b1000
+};
+
+void bytes_to_board(uint8_t bytes[16], bitboard board[2]) {
+	std::memcpy(&board[0], bytes, sizeof(bitboard));
+	std::memcpy(&board[1], bytes + 8, sizeof(bitboard));
+}
+
+void print_move(uint16_t move) {
+	std::cout << "move (" << int((move >> 8) & 7) << "," << int((move >> 11) & 7) << ") to (";
+	std::cout << int((move) & 7) << "," << int((move >> 3) & 7) << ")\n";
+}
+
+void show_board(bitboard board[2]) {
+	std::cout << " ___________________\n|                   |\n";
+	for (int i = 0; i < 8; i++) {
+		std::cout << "|  ";
+		for (int j = 7; j >= 0; j--) {
+			if ((board[0] & (LL1 << (j + 8 * i))) != 0) {
+				std::cout << "O ";
+			}
+			else if ((board[1] & (LL1 << (j + 8 * i))) != 0) {
+				std::cout << "X ";
+			}
+			else {
+				std::cout << "- ";
+			}
+		}
+		std::cout << " |" << i << "\n";
+	}
+	std::cout << "|___________________|\n   7 6 5 4 3 2 1 0" << "\n";
+}
+
+uint16_t translate_to_move(std::string line) {
+	int values[4];
+	uint16_t move = 0;
+	if (line.length() < 4) {
+		return 0;
+	}
+	for (int i = 0; i < 4; i++) {
+		values[i] = int(line[i]) - int('0');
+	}
+	for (int i = 0; i < 2; i++) {
+		if (values[i] >= 0 && values[i] < 8 ) {
+			move|= values[i] <<(3*i+8);
+		}
+	}
+	for (int i = 0; i < 2; i++) {
+		if (values[i+2] >= 0 && values[i+2] < 8) {
+			move |= values[i+2] << (3*i);
+		}
+	}
+	return move;
+}
+
+bool write_to_file(bitboard board[2], float rating,uint8_t player_index,std::string filename = "data") {
+	std::ofstream ofile(filename, std::fstream::out | std::fstream::binary|std::fstream::app);
+	ofile.write((const char*)&board[player_index], sizeof(bitboard));
+	ofile.write((const char*)&board[1-player_index], sizeof(bitboard));
+	ofile.write((const char*)&rating, sizeof(float));
+	ofile.close();
+	return true;
+}
+
+bool read_from_file(bitboard board[2], float &rating, uint8_t player_index, std::string filename = "data") {
+	std::ifstream ifile(filename, std::fstream::in | std::fstream::binary);
+	ifile.read((char*)&board[player_index], sizeof(bitboard));
+	ifile.read((char*)&board[1 - player_index], sizeof(bitboard));
+	ifile.read((char*)&rating, sizeof(float));
+	ifile.close();
+	return true;
+}
+
+uint8_t generate_byte_set_count(uint8_t byte) {
+	static const uint8_t NIBBLE_LOOKUP[16] =
+	{
+	  0, 1, 1, 2, 1, 2, 2, 3,
+	  1, 2, 2, 3, 2, 3, 3, 4
+	};
+
+	return NIBBLE_LOOKUP[byte & 0x0F] + NIBBLE_LOOKUP[byte >> 4];
+}
+
+uint8_t* generate_row_piece_cols(uint8_t byte) {
+	uint8_t count = BYTE_SET_COUNT_LOOKUP[byte];
+	//TODO remove static and add lookup
+	static uint8_t* cols = new uint8_t[count];
+	uint8_t index = 0;
+	for (uint8_t col = 0; col < 8; col++) {
+		if ((byte & (1 << col)) != 0) {
+			cols[index] = col;
+		}
+	}
+	return cols;
+}
+
+uint8_t* generate_axial_moves(uint8_t sides_byte,uint8_t corners_byte) {
+	int index1 = 0;
+	int arrindex = 0;
+
+	uint8_t *moves = new uint8_t[4];
+	while (index1 < 4) {
+		if ((CIRCULAR_MASK_LOOKUP[index1] & sides_byte)!=0) {
+			int index2 = (index1 + 1) % 4;
+			int piece_moves = 0;
+			bool real_moves_done = false;
+			uint8_t mini_control_mask = 0;
+			while ((
+				(CIRCULAR_MASK_LOOKUP[(index2+3)%4+4] & (corners_byte)))==0 && piece_moves <3 &&
+				index2 != index1){
+				mini_control_mask |= 1<<index2;
+				if ((CIRCULAR_MASK_LOOKUP[index2] & sides_byte) == 0 && !real_moves_done) {
+					moves[arrindex] = (DIRECTIONAL_POSITIONS[index1] << 4) | DIRECTIONAL_POSITIONS[index2];
+					arrindex++;
+					piece_moves++;
+					if ((CIRCULAR_MASK_LOOKUP[index2] & (sides_byte >> 4)) != 0) {
+						break;
+					}
+				}
+				else {
+					real_moves_done = true;
+				}
+				index2 = (index2 + 1) % 4;
+				
+			}
+			index2 = (index1 + 3) % 4;
+			real_moves_done = false;
+			while ((
+				(CIRCULAR_MASK_LOOKUP[index2 + 4] & (corners_byte))) == 0 && piece_moves < 3 &&
+				index2 != index1) {
+				mini_control_mask |= 1 << index2;
+				if ((CIRCULAR_MASK_LOOKUP[index2] & sides_byte) == 0 && !real_moves_done) {
+					moves[arrindex] = (DIRECTIONAL_POSITIONS[index1] << 4) | DIRECTIONAL_POSITIONS[index2];
+					arrindex ++;
+					piece_moves++;
+					if ((CIRCULAR_MASK_LOOKUP[index2] & (sides_byte >> 4)) != 0) {
+						break;
+					}
+				}
+				else {
+					real_moves_done = true;
+				}
+				index2 = (index2 + 3) % 4;
+				
+			}
+			for (int i = 0; i < 4; i++) {
+				uint8_t AMCL = AXIAL_MOVES_CONTROL_LOOKUP[sides_byte][corners_byte];
+				AXIAL_MOVES_CONTROL_LOOKUP[sides_byte][corners_byte] &= ~(3 << (i * 2));
+				AXIAL_MOVES_CONTROL_LOOKUP[sides_byte][corners_byte] |=
+					(((AMCL >> i * 2) & 3) + int(((mini_control_mask>>i)&1) == 1)) << i * 2;
+			}
+
+		}
+		index1 += 1;
+	}
+	AXIAL_MOVES_LOOKUP[sides_byte][corners_byte] = moves;
+	AXIAL_MOVE_COUNT_LOOKUP[sides_byte][corners_byte] = arrindex;
+	return moves;
+
+}
+
+int count_pieces(uint8_t board[16], uint8_t is_second_player) {
+	int count = 0;
+	for (int i = 0; i < 8; i++) {
+		count += BYTE_SET_COUNT_LOOKUP[board[i + 8 * is_second_player]];
+	}
+	return count;
+}
+
+int count_pieces(bitboard half_board) {
+	int count = 0;
+	uint8_t* board_bytes = reinterpret_cast<uint8_t*>(&half_board);
+	for (int i = 0; i < 8; i++) {
+		count += BYTE_SET_COUNT_LOOKUP[(*(board_bytes + i))];
+	}
+	return count;
+}
+
+uint8_t get_piece_at_pos(uint8_t board[16], uint8_t x, uint8_t y, uint8_t is_second_player) {
+	if (x < 0 || x > 7 || y < 0 || y > 7) {
+		return 2;
+	}
+	if ((board[y + 8* is_second_player] & (1 << x)) != 0) {
+		return 1;
+	}
+	return 0;
+}
+uint8_t get_piece_from_byte(uint8_t board[16], uint8_t pos, uint8_t is_second_player) {
+	if ((board[(pos>>3) + 8 * is_second_player] & (1 << (pos&7))) != 0) {
+		return 1;
+	}
+	return 0;
+}
+
+uint8_t get_circular_byte(bitboard half_board, uint8_t x, uint8_t y) {
+	//(ul)(u)(ur)(l)(r)(dl)(d)(dr)
+	//cscsscsc
+	uint8_t circular_byte = 0;
+	uint8_t *board_bytes = reinterpret_cast<uint8_t*>( & half_board);
+	//L-R
+	circular_byte |= (((( * (board_bytes + y)) >> (x - 1)) << 3) & 0b00001000);
+	circular_byte |= (((( * (board_bytes + y)) >> (x + 1)) << 4) & 0b00010000);
+	//U
+	circular_byte |= (( ( * (board_bytes + y - 1))) >> 1) & 0b11100000 & LLC[int(x == 7)];
+	circular_byte |= (( ( * (board_bytes + y - 1))) << (6 - x)) & 0b11100000 & LLC[int(x != 7)];
+	//D
+	circular_byte |= (( * (board_bytes + y + 1)) << 1) & 0b00000111 & LLC[int(x == 0)];
+	circular_byte |= (( * (board_bytes + y + 1)) >> (x - 1)) & 0b00000111 & LLC[int(x != 0)];
+
+	return circular_byte;
+}
+
+uint8_t get_sides_from_circular_bytes(uint8_t b1, uint8_t b2) {
+	// rudlrudl
+	return (b1 & 0b1010)|((b1>>4) & 0b0101) | (b2 & 0b01010000) | ((b2 << 4) & 0b10100000);
+}
+uint8_t get_corners_from_circular_bytes(uint8_t b1, uint8_t b2) {
+	//(ul)(dl)(ur)(dr)
+	return (b1 & 0b0101) | ((b1 >> 4) & 0b1010) | (b2 & 0b0101) | ((b2 >> 4) & 0b1010);
+}
+
+
+
+
+void get_axial_moves(bitboard board[2], uint8_t pos, uint8_t is_second_player, MoveContainer &moves, uint8_t control_board[64]) {
+	uint8_t player_byte, opponent_byte, sides_byte, corners_byte;
+	uint8_t off_limits_mask = AXIAL_MASKS[int((pos & 7) == 7)] | AXIAL_MASKS[2 + int((pos & 7) == 0)]
+		| AXIAL_MASKS[4 + int((pos & 56) == 0)] | AXIAL_MASKS[6 + int((pos & 56) == 56)];
+	uint8_t x = (pos & 7);
+	uint8_t y = ((pos >> 3) & 7);
+	player_byte = get_circular_byte(board[is_second_player], x, y);
+	opponent_byte = get_circular_byte(board[1- is_second_player], x, y);
+	sides_byte = get_sides_from_circular_bytes(player_byte, opponent_byte);
+	corners_byte = get_corners_from_circular_bytes(player_byte, opponent_byte) | off_limits_mask;
+	uint8_t* premade_moves = AXIAL_MOVES_LOOKUP[sides_byte][corners_byte];
+	uint8_t move_count = AXIAL_MOVE_COUNT_LOOKUP[sides_byte][corners_byte];
+
+	moves.move_count+= move_count;
+	for (int i = 0; i < move_count; i++) {
+		uint8_t rpos1 = ((premade_moves[i] >> 4) & 0b0011) | ((premade_moves[i] >> 3) & 0b11000);
+		uint8_t pos1 = int8_t(pos) + int8_t(rpos1) - 9;
+		uint8_t rpos2 = ((premade_moves[i]) & 0b0011) | ((premade_moves[i] << 1) & 0b11000);
+		uint8_t pos2 = int8_t(pos) + int8_t(rpos2) - 9;
+		moves.moves[i] = (uint16_t(pos1) << 8) | uint16_t(pos2);
+	}
+	uint8_t axial_mask = AXIAL_MOVES_CONTROL_LOOKUP[sides_byte][corners_byte];
+	control_board[(pos + 64 - 8) % 64] += (axial_mask) & 3;
+	control_board[(pos + 64 - 1) % 64] += (axial_mask >> 2) & 3;
+	control_board[(pos + 8) % 64] += (axial_mask >> 4) & 3;
+	control_board[(pos + 1) % 64] += (axial_mask >> 6) & 3;
+}
+
+void get_diagonal_moves(bitboard board[2], uint8_t pos, uint8_t is_second_player, MoveContainer& moves, uint8_t control_board[64]) {
+	uint8_t x = (pos & 7);
+	uint8_t y = ((pos >> 3) & 7);
+	unsigned long final_pos;
+	bitboard main_diagonal = ((DIAG_MAIN_BOARD >> (8 * (x - y))) | LLC[int((x - y) < 0)])
+		& ((DIAG_MAIN_BOARD << (8 * (y - x))) | LLC[int((x - y) >= 0)]);
+	bitboard rvrs_diagonal = ((DIAG_RVRS_BOARD << (8 * (x + y - 7))) | LLC[int((x + y - 7) < 0)])
+		& ((DIAG_RVRS_BOARD >> (8 * (7 - x - y))) | LLC[int((x + y - 7) >= 0)]);
+	bitboard upper_mask = (LLT >> 8 * (8 - y)) & LLC[int(y!=0)];
+	bitboard higher_upper_mask = (LLT >> 8 * (9 - y)) & LLC[int(y > 1)];
+	bitboard bottom_mask = (LLT << 8 * (y+1)) & LLC[int(y != 7)];
+	bitboard lower_bottom_mask = (LLT << 8 * (y + 2)) & LLC[int(y < 6)];
+	uint16_t pos16 = (uint16_t(pos) << 8);
+
+	//UP RIGHT
+
+	bitboard vur_positions = upper_mask & ~board[is_second_player] & main_diagonal;
+
+	_BitScanReverse64(&final_pos, vur_positions);
+	if (x-(final_pos&7) != 1 && vur_positions!=0) {
+		for (int i = pos - 9 * 2; (unsigned(i) >= final_pos) && (i > 0); i -= 9) { control_board[i] ++; }
+	    moves.moves[moves.move_count] = pos16 | uint16_t(final_pos);
+		moves.move_count++;
+	}
+
+	//UP LEFT
+	bitboard vul_positions = upper_mask & ~board[is_second_player] & rvrs_diagonal;
+
+	_BitScanReverse64(&final_pos, vul_positions);
+	if ((final_pos & 7)-x != 1 && vul_positions != 0) {
+		for (int i = pos - 7 * 2; (unsigned(i) >= final_pos)&&(i>0); i -= 7) { control_board[i] ++; }
+		moves.moves[moves.move_count] = pos16 | uint16_t(final_pos);
+		moves.move_count++;
+	}
+
+	//DOWN LEFT
+	bitboard vdl_positions = bottom_mask & ~board[is_second_player] & main_diagonal;
+
+	_BitScanForward64(&final_pos, vdl_positions);
+	if ((final_pos & 7) - x != 1 && vdl_positions != 0) {
+		for (int i = pos + 9 * 2; unsigned(i) <= final_pos; i += 9) { control_board[i] ++; }
+		moves.moves[moves.move_count] = pos16 | uint16_t(final_pos);
+		moves.move_count++;
+	}
+
+	//DOWN RIGHT
+	bitboard vdr_positions = bottom_mask & ~board[is_second_player] & rvrs_diagonal;
+
+	_BitScanForward64(&final_pos, vdr_positions);
+	if (x - (final_pos & 7) != 1 && vdr_positions != 0) {
+		for (int i = pos + 7 * 2; unsigned(i) <= final_pos; i += 7) { control_board[i] ++; }
+		moves.moves[moves.move_count] = pos16 | uint16_t(final_pos);
+		moves.move_count++;
+	}
+}
+
+
+ratedmovevector find_board_moves(bitboard board[2], uint8_t is_second_player, uint8_t control_board[64]) {
+	int total_move_count = 0;
+	int piece_count = count_pieces(board[is_second_player]);
+	if (piece_count == 0) {
+		return ratedmovevector();
+	}
+	movecontainervector move_groups(piece_count);
+	int current_piece = 0;
+	int move_count = 0;
+	for (int i = 0; i < 8; i++) {
+		uint8_t current_byte = (board[is_second_player] >> (i * 8)) & 0xFF;
+		uint8_t row_piece_count = BYTE_SET_COUNT_LOOKUP[current_byte];
+		for (int j = 0; j < row_piece_count; j++) {
+			unsigned long pos = 0;
+			_BitScanForward(&pos, current_byte);
+
+			MoveContainer moves;
+			get_axial_moves(board, i * 8 + pos, is_second_player, moves, control_board);
+			get_diagonal_moves(board, i * 8 + pos, is_second_player, moves, control_board);
+			if (moves.move_count > 5) {
+				std::cout << "what\n";
+			}
+			move_groups[current_piece] = moves;
+			current_piece++;
+			move_count += moves.move_count;
+			if (current_piece == piece_count) {
+				break;
+			}
+			current_byte = current_byte & ~(-current_byte);
+		}
+		if (current_piece == piece_count) {
+			break;
+		}
+	}
+	ratedmovevector final_moves(move_count);
+	int move_index = 0;
+	for (int i = 0; i < move_groups.size(); i++) {
+		for (int j = 0; j < move_groups[i].move_count; j++) {
+			
+			final_moves[move_index] = RatedMove(move_groups[i].moves[j]);
+			move_index++;
+		}
+	}
+	return final_moves;
+}
+
+void show_board_moves(bitboard board[2], uint8_t is_second_player) {
+	uint8_t control_board[64] = {};
+	auto moves = find_board_moves(board, is_second_player, control_board);
+	///*
+	for (int i = 0; i < 8; i++) {
+		for (int j = 0; j < 8; j++) {
+			std::cout << int(control_board[i * 8 + 7 - j]) << "\t";
+		}
+		std::cout << "\n";
+	}
+	//*/
+	for (int i = 0; i < moves.size(); i++) {
+		print_move(moves[i].move);
+	}
+
+	std::cout << "move_count = " << moves.size() << "\n";
+}
+
+void make_move(bitboard board[2], uint16_t move, uint8_t player_index) {
+	board[player_index] = (board[player_index] | (LL1 << (move & 0xFF))) & ~(LL1 << ((move >> 8) & 0xFF));
+	board[1 - player_index] = (board[1 - player_index] & ~(LL1 << (move & 0xFF)));
+}
+
+void initialize() {
+	srand(time(0));
+	//initialize BYTE_SET_COUNT_LOOKUP
+	for (int i = 0; i < 256; i++) {
+		BYTE_SET_COUNT_LOOKUP[i] = generate_byte_set_count(i);
+	}
+	BYTE_SET_COUNT_LOOKUP[255] = 8;
+	for (int i = 0; i < 256; i++) {
+		ROW_PIECE_COLS_LOOKUP[i] = generate_row_piece_cols(i);
+	}
+	for (int i = 0; i < 4096; i++) {
+		generate_axial_moves(i & 0xFF, i >> 8);
+	}
+	
+}
+
+void get_move_values(bitboard opponent_half_board, int8_t control_board[64], ratedmovevector moves,uint8_t move_values[8], uint8_t reversed = 0) {
+	//initial_protected / final_protected / final_attacking ( ifa )
+	//___, __a, _f_, _fa,  i__, i_a, if_, ifa,
+	for (int i = 0; i < moves.size(); i++) {
+		uint8_t initial_protected = (uint8_t)(signed((LLC[reversed] ^ control_board[moves[i].move >> 8]) + reversed) >= 0) << 2;
+		uint8_t final_protected = (uint8_t)(signed((LLC[reversed] ^ control_board[moves[i].move&0xFF])+ reversed) > 0) << 1;
+		uint8_t final_attacking = (uint8_t)(((opponent_half_board >> (moves[i].move & 0xFF))&1) != 0);
+		move_values[initial_protected| final_protected|final_attacking]++;
+	}
+}
+
+void get_control_values(bitboard board[2], int8_t control_board[64],uint8_t values[9], uint8_t player_index) {
+	//p:player, o:opponent, n:neutral, (piece _ control)
+	//p_p, p_n, p_o,
+	//n_p, n_n, n_o,
+	//o_p, o_n, o_o,
+
+	bitboard p1_control_bitboard = 0;
+	bitboard p2_control_bitboard = 0;
+	for (int i = 0; i < 64; i++) {
+		int diff = control_board[i];
+		p1_control_bitboard |= (LL1 << i) & LLC[int(diff > 0)];
+		p2_control_bitboard |= (LL1 << i) & LLC[int(diff < 0)];
+	}
+	//print
+	/*
+	std::cout << "control board:\n";
+	bitboard c_board[2] = {p1_control_bitboard, p2_control_bitboard};
+	for (int i = 0; i < 64; i++) {
+		std::cout << int(control_board[i]) << " ";
+		if (i % 8 == 7) {
+			std::cout << "\n";
+		}
+	}
+	std::cout << "control bitboard:\n";
+	show_board(c_board);
+	//end print
+	*/
+	uint8_t opponent_index = 1 - player_index;
+	bitboard n_conrol_bitboard = ~(p1_control_bitboard | p2_control_bitboard);
+	bitboard n_bitboard = ~(board[player_index] | board[opponent_index]);
+	
+	values[0] = count_pieces(p1_control_bitboard & board[player_index]);
+	values[1] = count_pieces(n_conrol_bitboard & board[player_index]);
+	values[2] = count_pieces(p2_control_bitboard & board[player_index]);
+
+	values[3] = count_pieces(p1_control_bitboard & n_bitboard);
+	values[4] = count_pieces(n_conrol_bitboard & n_bitboard);
+	values[5] = count_pieces(p2_control_bitboard & n_bitboard);
+
+	values[6] = count_pieces(p1_control_bitboard & board[opponent_index]);
+	values[7] = count_pieces(n_conrol_bitboard & board[opponent_index]);
+	values[8] = count_pieces(p2_control_bitboard & board[opponent_index]);
+
+}
+
+float pseudo_rate_board(bitboard board[2], uint8_t player_index,
+	ratedmovevector &player_moves,ratedmovevector &opponent_moves,
+	uint8_t control_board1[64], uint8_t control_board2[64]) {
+	uint8_t control_values[9] = {};
+	uint8_t player_move_values[8] = {};
+	uint8_t opponent_move_values[8] = {};
+	float total_rating = 0.0;
+	//p: player, o: opponent
+	if (player_moves.empty()) {
+		player_moves = find_board_moves(board, player_index, control_board1);
+	}
+	if (opponent_moves.empty()) {
+		opponent_moves = find_board_moves(board, 1 - player_index, control_board2);
+	}
+	int8_t total_control_board[64];
+	for (int i = 0; i < 64; i++) {
+		total_control_board[i] = (control_board1[i] - control_board2[i]);
+	}
+
+	get_control_values(board, total_control_board,control_values,player_index);
+	get_move_values(board[1-player_index], total_control_board, player_moves, player_move_values);
+	get_move_values(board[player_index], total_control_board, opponent_moves, opponent_move_values,1);
+	uint8_t input[25];
+	std::memcpy(input, control_values, 9);
+	std::memcpy(input +9, player_move_values, 8);
+	std::memcpy(input +9+8, opponent_move_values, 8);
+	for (int i = 0; i < 25; i++) {
+		total_rating += MODEL_WEIGHTS[i] * input[i];
+		if (i == 8) {
+			//std::cout << "intermediate rating =\t" << total_rating << "\n";
+		}
+		else if (i > 8) {
+			//std::cout << "\t" << int(input[i]);
+		}
+		if (i == 9 + 7) {
+			//std::cout << "\n";
+		}
+	}
+	//std::cout << "\n";
+	//std::cout << "total rating = \t\t" << total_rating << "\n";
+	return total_rating;
+}
+
+void pseudo_rate_board_moves(bitboard board[2],ratedmovevector &moves,uint8_t player_index) {
+	if (moves.size() == 0) {
+		return;
+	}
+	for (int i = 0; i < moves.size(); i++) {
+		auto move = &moves[i];
+		bitboard new_board[2] = { board[0],board[1] };
+		make_move(new_board, move->move, player_index);
+		ratedmovevector player_moves, opponent_moves;
+		uint8_t control_board1[64] = {}, control_board2[64] = {};
+		//print_move(move->move);
+		move->rating = pseudo_rate_board(new_board, player_index, player_moves, opponent_moves, control_board1, control_board2);
+	}
+}
+
+struct less_than_key
+{
+	inline bool operator() (const RatedMove& struct1, const RatedMove& struct2)
+	{
+		return (struct1.rating < struct2.rating);
+	}
+	inline bool operator() (const RatedMoveIndex& struct1, const RatedMoveIndex& struct2)
+	{
+		return (struct1.rating < struct2.rating);
+	}
+};
+
+float rate_board_moves(bitboard board[2], ratedmovevector &moves, uint8_t player_index, uint8_t depth,
+	float cutoff_percentage,float cutoff_fade = 0.75) {
+	const int move_size = moves.size();
+	if (move_size == 0) {
+		return -100;
+	}
+	ratedmovevector* opponent_moves_collection = new ratedmovevector[move_size];
+	auto boards_collection = new bitboard[move_size][2];
+	for (int i = 0; i < move_size; i++) {
+		ratedmovevector player_moves;
+		boards_collection[i][0] = board[0];
+		boards_collection[i][1] = board[1];
+		make_move(boards_collection[i], moves[i].move, player_index);
+		uint8_t control_board1[64], control_board2[64];
+		moves[i].rating = pseudo_rate_board(boards_collection[i], player_index,
+			player_moves, opponent_moves_collection[i],
+			control_board1, control_board2);
+	}
+
+	if (depth > 0) {
+		std::vector<RatedMoveIndex> move_indicies(move_size);
+		for (int i = 0; i < move_size; i++) {
+			move_indicies[i].index = i;
+			move_indicies[i].rating = moves[i].rating;
+		}
+		std::sort(move_indicies.begin(), move_indicies.end(), less_than_key());
+
+		float min_rating = move_indicies.front().rating;
+		float rating_comparison = cutoff_percentage * (move_indicies.back().rating - min_rating)+ min_rating;
+		float new_cutoff = 1 - cutoff_fade * (1- cutoff_percentage);
+
+		for (int i = move_size - 1; i >= 0; i--) {
+			auto move_index = move_indicies[i].index;
+			auto move = &moves[move_index];
+			if (move->rating < rating_comparison) {
+				break;
+			}
+			ratedmovevector player_moves = opponent_moves_collection[move_index];
+			move->rating = -rate_board_moves(boards_collection[move_index], player_moves, 1 - player_index,depth-1,new_cutoff);
+		}
+	}
+	delete[] opponent_moves_collection;
+	delete[] boards_collection;
+
+	float board_max_rating = moves[0].rating;
+	float board_rating = 0;
+	for (int i = 0; i < move_size; i++) {
+		board_rating += moves[i].rating;
+		board_max_rating = max(board_max_rating, moves[i].rating);
+	}
+	board_rating /= move_size;
+	board_rating = 1.0 * board_max_rating + 0.0 * board_rating;
+	return board_rating;
+}
+
+void do_stress_test(bitboard test_board[2], int n) {
+	clock_t start, end;
+	start = clock();
+	bitboard new_test_board[2] = { test_board[0], test_board[1] };
+	for (int i = 0; i < n; i++) {
+		uint8_t control_board[64] = {};
+		ratedmovevector player_moves,opponent_moves;
+		player_moves = find_board_moves(test_board, 0, control_board);
+		rate_board_moves(new_test_board, player_moves, 0,1,0);
+		
+		//pseudo_rate_board(new_test_board, 0, player_moves, opponent_moves);
+		new_test_board[0] = new_test_board[0] + 1;
+		show_board(new_test_board);
+	}
+	end = clock();
+	double time_taken = double(end - start) / double(CLOCKS_PER_SEC);
+	std::cout << "time taken by program is : " << time_taken << " seconds\n";
+}
+
+uint16_t pick_move(bitboard current_board[2], ratedmovevector moves,uint8_t current_player_index,
+	uint8_t steps = 0,bool save_result = false, std::string filename = "data") {
+	uint16_t move = 0;
+	float board_rating = rate_board_moves(current_board, moves, current_player_index, steps, 0.0, 1.0);
+	if (save_result) {
+		write_to_file(current_board, board_rating, current_player_index,filename);
+	}
+	std::sort(moves.begin(), moves.end(), less_than_key());
+	int move_index = max(0, moves.size() - (rand() % 3) - 1);
+
+	if (move_index < 0) {
+		move_index = 0;
+	}
+
+	if (moves[move_index].rating + 3 < moves.back().rating) {
+		move_index = moves.size() - 1;
+	}
+
+	move = moves[move_index].move;
+
+	return move;
+}
+
+bool move_legal(ratedmovevector moves, uint16_t move) {
+	for (int i = 0; i < moves.size(); i++) {
+		if (move == moves[i].move) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void auto_play_game(bitboard starting_board[2]) {
+	bitboard current_board[2] = { starting_board[0],starting_board[1] };
+
+	uint8_t current_player_index = 0;
+	for (int i = 0; i < 100000; i++) {
+		uint8_t control_board[64] = {};
+		ratedmovevector moves =	find_board_moves(current_board, current_player_index, control_board);
+		uint16_t move = 0;
+		if (moves.size() == 0) {
+			break;
+		}
+		if (current_player_index == 1) {
+			move = pick_move(current_board, moves, current_player_index,0);
+			//pseudo_rate_board_moves(current_board, moves, current_player_index);
+		}
+		else {
+			ratedmovevector opponent_moves;
+			uint8_t o_control_board[64] = {};
+			pseudo_rate_board(current_board, current_player_index, moves, opponent_moves,control_board,o_control_board);
+			while (!move_legal(moves, move)) {
+				std::cout << "play move:\n";
+				std::string input;
+				std::getline(std::cin, input);
+				move = translate_to_move(input);
+			}
+			//rate_board_moves(current_board, moves, current_player_index, 2, 0.0, 1.0);
+		}
+		//rate_board_moves(current_board, moves, current_player_index,2,0.0,1.0);
+		//pseudo_rate_board_moves(current_board, moves, current_player_index);
+		
+		make_move(current_board, move, current_player_index);
+		current_player_index = 1 - current_player_index;
+		if (i < 20 || true) {
+			Sleep(500);
+			show_board(current_board);
+			std::cout << "\n";
+		}
+		else if (i%5 == 0) {
+			std::cout << "skipping five moves\n";
+			Sleep(500);
+			show_board(current_board);
+			std::cout << "\n";
+		}
+
+	}
+	show_board(current_board);
+}
+
+bool boards_equal(bitboard board1[2], bitboard board2[2]) {
+	return (board1[0] == board2[0]) && (board1[1] == board2[1]);
+}
+
+void gather_data(bitboard initial_board[2],std::string filename) {
+	for (int board_index = 0; board_index < 1000; board_index++) {
+		bitboard current_board[2] = { initial_board[0],initial_board[1] };
+
+		uint8_t current_player_index = 0;
+		for (int i = 0; i < 10; i++) {
+			uint8_t control_board[64] = {};
+			ratedmovevector moves = find_board_moves(current_board, current_player_index, control_board);
+			uint16_t move = 0;
+			if (moves.size() == 0) {
+				break;
+			}
+			move = pick_move(current_board, moves, current_player_index, 0);
+
+			make_move(current_board, move, current_player_index);
+			current_player_index = 1 - current_player_index;
+		}
+		show_board(current_board);
+		bitboard last_4_boards[4][2] = { {0,0}, {1,1}, {2,2}, {3,3} };
+		bitboard last_board_index = 0;
+		for (int i = 0; i < 100; i++) {
+			if (boards_equal(last_4_boards[last_board_index], current_board)) {
+				break;
+			}
+			std::memcpy(last_4_boards[last_board_index], current_board, sizeof(bitboard) * 2);
+			last_board_index = (last_board_index+1)%4;
+
+			uint8_t control_board[64] = {};
+			ratedmovevector moves = find_board_moves(current_board, current_player_index, control_board);
+			uint16_t move = 0;
+			if (moves.size() == 0) {
+				break;
+			}
+			
+
+			move = pick_move(current_board, moves, current_player_index, 2,true, filename);
+
+			make_move(current_board, move, current_player_index);
+			current_player_index = 1 - current_player_index;
+			std::cout << "-";
+		}
+		std::cout << "\n";
+		show_board(current_board);
+	}
+}
+
+void fix_data(bitboard board[2],float rating, std::ofstream &ofile) {
+	uint8_t control_values[9] = {};
+	uint8_t player_move_values[8] = {};
+	uint8_t opponent_move_values[8] = {};
+	float total_rating = 0.0;
+	//p: player, o: opponent
+	uint8_t control_board1[64] = {}, control_board2[64] = {};
+	auto player_moves = find_board_moves(board, 0, control_board1);
+	auto opponent_moves = find_board_moves(board, 1, control_board2);
+	int8_t total_control_board[64];
+	for (int i = 0; i < 64; i++) {
+		total_control_board[i] = (control_board1[i] - control_board2[i]);
+	}
+
+	get_control_values(board, total_control_board, control_values, 0);
+	get_move_values(board[1], total_control_board, player_moves, player_move_values);
+	get_move_values(board[0], total_control_board, opponent_moves, opponent_move_values, 1);
+	uint8_t input[25];
+	std::memcpy(input, control_values, 9);
+	std::memcpy(input + 9, player_move_values, 8);
+	std::memcpy(input + 9 + 8, opponent_move_values, 8);
+
+	ofile.write((const char*)&input, sizeof(uint8_t)*25);
+	ofile.write((const char*)&rating, sizeof(float));
+}
+
+void fix_file_data(std::string filename = "data4") {
+	std::ifstream ifile(filename, std::fstream::in | std::fstream::binary);
+	std::ofstream ofile(filename + "_fixed", std::fstream::out | std::fstream::binary | std::fstream::app);
+	while (!ifile.eof()) {
+		bitboard board[2];
+		float rating;
+		ifile.read((char*)&board[0], sizeof(bitboard));
+		ifile.read((char*)&board[1], sizeof(bitboard));
+		ifile.read((char*)&rating, sizeof(float));
+		fix_data(board, rating,ofile);
+	}
+
+	ifile.close();
+	ofile.close();
+}
+
+int main() {
+	initialize();
+	uint8_t test_board_pre[16] = {
+
+		0b00001100,
+		0b00001100,
+		0b00110000,
+		0b00110000,
+		0b00001100,
+		0b00001100,
+		0b00110000,
+		0b00110000,
+
+		0b00110000,
+		0b00110000,
+		0b00001100,
+		0b00001100,
+		0b00110000,
+		0b00110000,
+		0b00001100,
+		0b00001100,
+	};
+		/*{
+
+		0b00000000,
+		0b00000000,
+		0b00000000,
+		0b00000000,
+		0b00000000,
+		0b00000000,
+		0b11111111,
+		0b11111111,
+
+		0b11111111,
+		0b11111111,
+		0b00000000,
+		0b00000000,
+		0b00000000,
+		0b00000000,
+		0b00000000,
+		0b00000000,
+	};*/
+
+	bitboard test_board[2];
+	bytes_to_board(test_board_pre,test_board);
+
+	show_board(test_board);
+	
+	std::cout << "\n";
+
+	//fix_file_data();
+	//gather_data(test_board,"data4");
+
+	//show_board_moves(test_board, 0);
+	auto_play_game(test_board);
+	//do_stress_test(test_board, 10);
+	return 0;
+}
