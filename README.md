@@ -1,5 +1,5 @@
 # Board-game
- An application with an AI scoring different moves of the board game based on heuristics. It uses simple statistical methods to decide the moves which are more likely to win, using a depth first search with pruning.
+ An application with a simple AI scoring different moves of the board game based on heuristics. It uses simple statistical methods to decide the moves which are more likely to win, using a depth first search with pruning.
 
 ## Versions
  ### Python version
@@ -27,16 +27,8 @@
 
 ## How to use
 ### Python
-#### requirements
-- numpy
-- time
-- multiprocessing
-- random
-- pygame
-- math
-- threading
-
 Run the `app.py` from the board_py directory
+
 #### Controls:
 - LMB	:Move a piece
 - F2	:Toggle Assist

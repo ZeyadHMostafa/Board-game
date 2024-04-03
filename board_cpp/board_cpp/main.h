@@ -4,11 +4,13 @@
 	speed up computation for the game analysis
 */
 #include <iostream>
+#include <stdint.h>
 #include <bitset>
 #include <vector>
 #include <algorithm>
 #include <string>
 #include <fstream>
+#include <cstring>
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -65,7 +67,7 @@ static const float MODEL_WEIGHTS[25] = {
 		-0.01,-2.3,  -0.4,-1.8,
 };
 
-static struct MoveContainer {
+struct MoveContainer {
 	uint8_t move_count = 0;
 	uint16_t moves[5] = {};
 	MoveContainer(uint16_t* _moves, uint8_t _move_count) {
@@ -77,12 +79,12 @@ static struct MoveContainer {
 	}
 };
 
-static struct RatedMoveIndex {
+struct RatedMoveIndex {
 	uint8_t index = 0;
 	float rating = 0.0;
 };
 
-static struct RatedMove {
+struct RatedMove {
 	uint16_t move = 0;
 	float rating = 0;
 	RatedMove() {}

@@ -157,8 +157,8 @@ float rate_board_moves(bitboard board[2], ratedmovevector& moves, uint8_t player
 		float min_rating = moves[0].rating;
 		float max_rating = min_rating;
 		for (int i = 0; i < moves.size(); i++) {
-			min_rating = min(moves[i].rating, min_rating);
-			max_rating = max(moves[i].rating, max_rating);
+			min_rating = std::min(moves[i].rating, min_rating);
+			max_rating = std::max(moves[i].rating, max_rating);
 		}
 		float rating_comparison = cutoff_percentage * (max_rating - min_rating) + min_rating;
 		float new_cutoff = 1 - cutoff_fade * (1 - cutoff_percentage);
@@ -178,7 +178,7 @@ float rate_board_moves(bitboard board[2], ratedmovevector& moves, uint8_t player
 	float board_rating = 0;
 	for (int i = 0; i < move_size; i++) {
 		board_rating += moves[i].rating;
-		board_max_rating = max(board_max_rating, moves[i].rating);
+		board_max_rating = std::max(board_max_rating, moves[i].rating);
 	}
 	board_rating /= move_size;
 	board_rating = 1.0 * board_max_rating + 0.0 * board_rating;
@@ -195,13 +195,13 @@ uint16_t pick_move(bitboard current_board[2], ratedmovevector moves, uint8_t cur
 	}
 	std::sort(moves.begin(), moves.end(), less_than_key());
 	int move_diff = (rand() % 3);
-	int move_index = max(0, (int)(moves.size() - move_diff - 1));
+	int move_index = std::max(0, (int)(moves.size() - move_diff - 1));
 
 	if (moves[move_index].rating + 3 < moves.back().rating) {
 		move_index = moves.size() - 1;
 	}
 
-	for (int i = moves.size() - 1; i >= max(0, (int)(moves.size() - 3)); i--) {
+	for (int i = moves.size() - 1; i >= std::max(0, (int)(moves.size() - 3)); i--) {
 		print_move(moves[i].move);
 		std::cout << moves[i].rating << "\n";
 	}
