@@ -25,6 +25,10 @@ float pseudo_rate_board(bitboard board[2], uint8_t player_index,
 
 void pseudo_rate_board_moves(bitboard board[2], ratedmovevector& moves, uint8_t player_index);
 
+extern "C" __declspec(dllexport)
+uint8_t python_find_rated_board_moves(bitboard board[2], RatedMove pymoves[80],uint8_t control_board1[64],uint8_t control_board2[64],
+	uint8_t player_index, float &board_rating, uint8_t depth, float cutoff_percentage, float cutoff_fade);
+
 float rate_board_moves(bitboard board[2], ratedmovevector& moves, uint8_t player_index, uint8_t depth,
 	float cutoff_percentage, float cutoff_fade = 0.75);
 

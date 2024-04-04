@@ -89,8 +89,10 @@ void get_diagonal_moves(bitboard board[2], uint8_t pos, uint8_t is_second_player
 
 // find all moves and rate them
 ratedmovevector find_board_moves(bitboard board[2], uint8_t is_second_player, uint8_t control_board[64]) {
+	
 	int total_move_count = 0;
 	int piece_count = count_pieces(board[is_second_player]);
+
 	if (piece_count == 0) {
 		//TODO check count pieces
 		return ratedmovevector();

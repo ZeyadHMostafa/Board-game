@@ -141,7 +141,7 @@ float rate_board_moves(bitboard board[2], ratedmovevector& moves, uint8_t player
 		boards_collection[i][0] = board[0];
 		boards_collection[i][1] = board[1];
 		make_move(boards_collection[i], moves[i].move, player_index);
-		uint8_t control_board1[64], control_board2[64];
+		uint8_t control_board1[64]={0}, control_board2[64]={0};
 		moves[i].rating = pseudo_rate_board(boards_collection[i], player_index,
 			player_moves, opponent_moves_collection[i],
 			control_board1, control_board2);
@@ -185,6 +185,23 @@ float rate_board_moves(bitboard board[2], ratedmovevector& moves, uint8_t player
 	return board_rating;
 }
 
+// a wrapper for the python version
+uint8_t python_find_rated_board_moves(bitboard board[2], RatedMove pymoves[80],
+	uint8_t control_board1[64],uint8_t control_board2[64], uint8_t player_index,
+	 float &board_rating, uint8_t depth, float cutoff_percentage, float cutoff_fade){
+	ratedmovevector moves = find_board_moves(board, player_index, control_board1);
+	
+	if (depth!=255){
+		find_board_moves(board, 1-player_index, control_board2);
+		board_rating = rate_board_moves(board, moves, player_index, depth,
+		cutoff_percentage, cutoff_fade);
+	}
+
+	for (int i =0; i <moves.size();i++){
+		std::memcpy(&pymoves[i],&moves[i],sizeof(moves[i]));
+	}
+	return moves.size();
+}
 
 uint16_t pick_move(bitboard current_board[2], ratedmovevector moves, uint8_t current_player_index,
 	uint8_t steps, bool save_result, std::string filename) {

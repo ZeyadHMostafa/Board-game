@@ -92,6 +92,7 @@ struct RatedMove {
 		move = _move;
 	}
 	RatedMove(uint16_t _move, float _rating) {
+		move = _move;
 		rating = _rating;
 	}
 };

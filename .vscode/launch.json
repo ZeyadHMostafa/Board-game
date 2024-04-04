@@ -4,7 +4,7 @@
             "name": "C/C++: g++.exe build and debug all files",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${fileDirname}\\${fileBasenameNoExtension}.exe",
+            "program": "${fileDirname}\\..\\build\\board_cpp.exe",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",

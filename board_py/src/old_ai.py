@@ -1,9 +1,15 @@
 import board_handler
 import numpy as np
+import math
 import time
 import multiprocessing
 from random import choices
+
 vec2 = board_handler.vec2
+
+# WARNING
+# this module is depricated
+# board_cpp handles this much faster
 
 def rate_board(board,player):
 	pass
@@ -114,8 +120,8 @@ def get_board_union_score(board,player):
 def rate_move(board,player,move):
 		return approximate_board_score(board_handler.move_piece(board,player,move),player)
 
-
 # TODO: fix scoring probability selection (takes too much time)
+# depricated anyways, so not a priority. use c_score_moves instead
 def threaded_score_moves(board,player,moves,relative = True, difficulty = 2,depth = 1,thread_data_list = [],thread_index = 0):
 	if relative:
 		st = time.time()
@@ -200,7 +206,11 @@ def score_moves(board,player,moves,relative = True, difficulty = 2,depth = 1):
 def sort_moves(scored_moves):
 	return sorted(scored_moves, key=lambda x: x[1])
 
-def choose_move(scored_moves):
+def choose_move(scored_moves,determination=5):
 	moves = [x[0] for x in scored_moves]
-	scores = [x[1] for x in scored_moves]
-	return choices(population=moves,weights=scores,k=1)[0]
+	scores = [math.e**(determination*x[1]) for x in scored_moves]
+	choice = choices(population=moves,weights=scores,k=1)[0]
+	idx = moves.index(choice)
+	print(f"chose move number {len(moves)-idx} from the top")
+	print(f"move score = {scored_moves[idx][1]*10:.2f}/{scored_moves[-1][1]*10:.2f}")
+	return choice
