@@ -1,4 +1,4 @@
-./board_py/src/__pycache__/
+board_py/src/__pycache__/
 .venv/
-./board_cpp/data/
-./board_cpp/backups/
+board_cpp/data/
+board_cpp/backups/

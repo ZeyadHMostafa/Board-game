@@ -1,6 +1,0 @@
-Extra challenges
-
-Water: pieces can use their moves around the opponents pieces as well
-Earth: the last piece that just moved cannot be taken
-Fire: the last piece that just taken a piece can keep going as long as it is taking other pieces every move
-Wind: pieces can use their moves around empty places, but these moves cannot take opponent pieces
