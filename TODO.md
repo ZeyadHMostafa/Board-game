@@ -1,0 +1,14 @@
+- [ ] update interface
+	- [ ] replace pygame with tkinter or pyqt for better and easier to use interface
+	- [ ] add a clear game-over indicator
+	- [ ] clarify the current player
+	- [ ] clarify the winning moves
+	- [ ] allow the training of the ai inside using the interface
+	- [ ] display the controls for the player during runtime
+	- [ ] include a help menu explaining the rules during runtime
+
+- [ ] improve backend
+	- [ ] remove depricated code
+	- [ ] export more features from the c library
+	- [ ] make more features usable without hardcoding
+	- [ ] check stockfish and see what similar optimizations can be made

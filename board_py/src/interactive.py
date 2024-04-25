@@ -5,7 +5,11 @@ import numpy as np
 from pygame import Vector2, Rect
 
 import board_handler
-import AI
+import board_cpp_wrapper
+import ai_handler as AI
+
+import old_ai
+import board_handler_old
 
 # Interactive Constants
 FPS_AVERAGING_TIME = 1000
@@ -40,15 +44,17 @@ MAIN_BOARD_CONFIGURATION = bytearray([
 class Game:
 	# initialization functions
 	def __init__(self,board_file = None) -> None:
+		self.ai_depth = 2
+		self.assist_depth = 2
+		self.initialize_game(board_file)
+
+	def initialize_game(self,board_file=None):
 		if board_file:
 			self.load_board(board_file)
 		else:
 			self.board = MAIN_BOARD_CONFIGURATION
-		self.initialize_game()
-
-	def initialize_game(self):
 		self.game_ended = False
-
+		self.control_boards=[[0]*64,[0]*64]
 		self.initialize_display()
 		self.initialize_clock()
 
@@ -92,6 +98,7 @@ class Game:
 		self.show_control = False
 		self.update_board= True
 		self.update_assist = True
+		self.assist_board = None
 		self.update_control_boards = True
 		self.running = True
 
@@ -103,7 +110,7 @@ class Game:
 			self.step_once = False
 			self.move_time = 0
 			self.current_move += 1
-			moves = board_handler.find_board_moves(self.board,self.current_player)
+			moves = AI.find_rated_moves(self.board,self.current_player)
 			if len(moves) == 0:
 				print("black" if self.current_player == 0 else "white"," wins")
 				self.game_ended = True
@@ -130,8 +137,10 @@ class Game:
 		if self.show_assist:
 			if self.update_assist:
 				if not self.AI_thread2.is_alive():
+					self.assist_board = self.board
 					self.AI_thread2 = threading.Thread(target=self.threaded_AI_display, args = (),daemon=True)
 					self.AI_thread2.start()
+					
 			if not self.update_assist:
 				self.game_display.blit(self.assist_image,Vector2(0,0))
 			#extra
@@ -178,7 +187,9 @@ class Game:
 			moves = board_handler.find_board_moves(board,player)
 		if len(moves) == 0 :
 			return image
-		sorted_moves = AI.sort_moves(AI.threaded_score_moves(board,player,moves,True,1))
+		# slow depricated sort_moves replaced with board_cpp_wrapper.find_rated_moves
+		# sorted_moves = AI.sort_moves(AI.threaded_score_moves(board,player,moves,True,1))
+		sorted_moves = board_cpp_wrapper.find_rated_moves(board,player,depth=self.assist_depth)
 		moves_to_display = sorted_moves[-min(move_count,len(moves)-1):]
 		moves_to_display.reverse()
 		for i in range(len(moves_to_display)):
@@ -204,12 +215,14 @@ class Game:
 	## show how controlled each tile is
 	def generate_control_board_image(self):
 		image = pygame.Surface((TILE_SIZE*8,TILE_SIZE*8),pygame.SRCALPHA, 32)
-		p_moves,p_pseudo_moves = board_handler.find_board_moves(self.board,self.current_player,True)
-		o_moves,o_pseudo_moves = board_handler.find_board_moves(self.board,1-self.current_player,True)
-		self.control_boards = [AI.generate_control_board(p_moves+p_pseudo_moves),AI.generate_control_board(o_moves+o_pseudo_moves)]
+		AI.find_rated_moves(self.board,self.current_player,control_board1=self.control_boards[0],control_board2=self.control_boards[1])
+		# depricated
+		#p_moves,p_pseudo_moves = board_handler_old.find_board_moves(self.board,self.current_player,True)
+		#o_moves,o_pseudo_moves = board_handler_old.find_board_moves(self.board,1-self.current_player,True)
+		#self.control_boards = [old_ai.generate_control_board(p_moves+p_pseudo_moves),old_ai.generate_control_board(o_moves+o_pseudo_moves)]
 		for i in range(8):
 				for j in range(8):
-					total_control = self.control_boards[self.current_player][j][i] - self.control_boards[1-self.current_player][j][i]
+					total_control = self.control_boards[self.current_player][i*8+7-j] - self.control_boards[1-self.current_player][i*8+7-j]
 					text_image = self.FONT2.render(str(total_control), True, (255,255,255),(0,0,0))
 					image.blit(text_image,(TILE_SIZE*j,TILE_SIZE*i))
 		return image
@@ -236,7 +249,9 @@ class Game:
 	# show AI rated moves (separate function for threading purposes)
 	def threaded_AI_display(self):
 		self.assist_image = self.image_from_moves(self.board,self.current_player)
-		self.update_assist = False
+		if self.assist_board == self.board:
+			# only turn off update if correct board displayed
+			self.update_assist = False
 	
 	# playing moves
 
@@ -246,8 +261,14 @@ class Game:
 		self.AI_thread1.start()
 	
 	def threaded_AI_move(self,moves):
+		scored_moves = board_cpp_wrapper.find_rated_moves(self.board,self.current_player,depth=self.ai_depth)
 		
-		scored_moves = AI.threaded_score_moves(self.board,self.current_player,moves,difficulty=9)
+		# depricated: use board_cpp_wrapper.find_rated_moves
+		# scored_moves = AI.threaded_score_moves(self.board,self.current_player,moves,difficulty=9)
+		
+		# to force best move
+		# move = scored_moves[-1][0]
+		
 		move = AI.choose_move(scored_moves)
 		self.make_move(move)
 		self.locked = False
@@ -309,8 +330,9 @@ def handle_event(game:Game,event):
 				game.piece_selected = tile_pos
 			elif game.piece_selected:
 				move = bytearray([board_handler.pos_to_byte(game.piece_selected),board_handler.pos_to_byte(tile_pos)])
-				if move in board_handler.find_board_moves(game.board,game.current_player):
-					game.make_move(move)
+				for movex in AI.find_rated_moves(game.board,game.current_player):
+					if movex[0] == move:
+						game.make_move(move)
 				game.piece_selected = None
 	elif event.type == pygame.MOUSEMOTION:
 		buttons = pygame.mouse.get_pressed()

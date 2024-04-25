@@ -1,15 +1,20 @@
 # Board-game
- An application with an AI scoring different moves of the board game based on heuristics. It uses simple statistical methods to decide the moves which are more likely to win, using a depth first search with pruning.
+ An application with a simple AI scoring different moves of the board game based on heuristics. It uses simple statistical methods to decide the moves which are more likely to win, using a depth first search with pruning.
 
-## Versions
- ### Python version
- The python version was the original version written in preparation to use more complex machine learning techniques using tensorflow ; However, it was too slow to function as intended even with multi-core processing. For now it provides a good interactive way to play the game.
+![python interface during gameplay](sc1.png)
+<p align="center"> python interface during gameplay </p>
 
- ### C++ version
- Created to boost the speed of processing. Some techniques such as bitboards and lookup tables are used for optimization and it does work much faster than the python version. But it lacks the GUI of the python version and is currently only playable on the terminal. Despite that it is still usefull when computing AI vs AI matches.
+![c++ interface during gameplay](sc2.png)
+<p align="center"> c++ interface during gameplay </p>
+
+## interfaces
+ ### Python
+ The python version runs using the board_cpp.dll as a backend but provides a nice interactive GUI to play the game or simulate ai matches. There is also a couple of extra development files to compile the c++ dll and to adjust the weights of the AI based on previous games.
+
+ ### C++
+ Mostly functions as a backend for the python version. However, it also includes a console app which allows the user to play the game directly in the c++ version. Also includes a function that allows the user to autoplay battles while dumping their data into files to optimize using the python file.
 
 
----
  ## How to play
  ### Win condition
  Make sure the other player has no legal moves on their turn
@@ -27,16 +32,18 @@
 
 ## How to use
 ### Python
-#### requirements
-- numpy
-- time
-- multiprocessing
-- random
-- pygame
-- math
-- threading
+using python 3.11 (but earlier versions may work)
 
-Run the `app.py` from the board_py directory
+it is recommended to use a virtual environment
+
+go to the main directory and install requirements.txt:
+
+```shell
+pip install -r requirements.txt
+```
+
+then go to the src directory and run main.py
+
 #### Controls:
 - LMB	:Move a piece
 - F2	:Toggle Assist
@@ -47,7 +54,18 @@ Run the `app.py` from the board_py directory
 - R		:Reset the game
 
 ### C++
-Run the executable in `x64/Debug` or compile, build and execute the solution
+Run the executable in `board_cpp/build` or compile, build and execute the solution
 - The controls are described at the beginning of the terminal
 - The game runs in interactive mode by default, currently the rest of the functionality is hardcoded and requires hardcode changes.
 
+### recompiling c++ dll:
+all c++ components were compiled with g++
+
+Note: this reuires installing the python libraries as well
+
+from the main directory run:
+```shell
+invoke buildBoardTask
+```
+
+or from `board_py/src/tasks.py` reconstruct the necessary shell code
