@@ -1,6 +1,12 @@
 # Board-game
  An application with a simple AI scoring different moves of the board game based on heuristics. It uses simple statistical methods to decide the moves which are more likely to win, using a depth first search with pruning.
 
+![python interface during gameplay](sc1.png)
+<p align="center"> python interface during gameplay </p>
+
+![c++ interface during gameplay](sc2.png)
+<p align="center"> c++ interface during gameplay </p>
+
 ## interfaces
  ### Python
  The python version runs using the board_cpp.dll as a backend but provides a nice interactive GUI to play the game or simulate ai matches. There is also a couple of extra development files to compile the c++ dll and to adjust the weights of the AI based on previous games.
@@ -9,7 +15,6 @@
  Mostly functions as a backend for the python version. However, it also includes a console app which allows the user to play the game directly in the c++ version. Also includes a function that allows the user to autoplay battles while dumping their data into files to optimize using the python file.
 
 
----
  ## How to play
  ### Win condition
  Make sure the other player has no legal moves on their turn
@@ -54,8 +59,13 @@ Run the executable in `board_cpp/build` or compile, build and execute the soluti
 - The game runs in interactive mode by default, currently the rest of the functionality is hardcoded and requires hardcode changes.
 
 ### recompiling c++ dll:
+all c++ components were compiled with g++
+
+Note: this reuires installing the python libraries as well
+
 from the main directory run:
 ```shell
 invoke buildBoardTask
 ```
 
+or from `board_py/src/tasks.py` reconstruct the necessary shell code

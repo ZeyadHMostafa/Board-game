@@ -1,9 +1,9 @@
 import ctypes as c
 import pathlib
 import board_handler
+from pathlib import Path
 
-#relative_path = "../../board_cpp/build/board_cpp.dll"
-relative_path = "board_cpp/build/board_cpp.dll"
+relative_path = Path(__file__).parent/'..'/'..'/'board_cpp'/'build'/'board_cpp.dll'
 
 libname = pathlib.Path().absolute() / relative_path
 
@@ -89,6 +89,7 @@ def find_board_moves(board,player_index:bool):
 	
 
 if __name__ == "__main__":
+	# depricated test, probably wont work with path difference
 	MAIN_BOARD_CONFIGURATION = bytearray([
 			0b00000000,
 			0b00000000,
