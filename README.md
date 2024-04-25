@@ -7,7 +7,7 @@
 ![c++ interface during gameplay](sc2.png)
 <p align="center"> c++ interface during gameplay </p>
 
-## interfaces
+## Interfaces
  ### Python
  The python version runs using the board_cpp.dll as a backend but provides a nice interactive GUI to play the game or simulate ai matches. There is also a couple of extra development files to compile the c++ dll and to adjust the weights of the AI based on previous games.
 
